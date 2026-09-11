@@ -1,0 +1,20 @@
+{
+  "name": "bel-blockchain-backend",
+  "version": "1.0.0",
+  "description": "BEL Blockchain Identity and Digital Asset Management Backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "ethers": "^6.17.0",
+    "express": "^5.1.0",
+    "mongoose": "^9.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
