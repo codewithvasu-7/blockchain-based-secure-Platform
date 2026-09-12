@@ -16,8 +16,6 @@ const auditsRouter = require("./routes/audits");
 
 const connectDatabase = require("./database");
 
-connectDatabase();
-
 // ============================================================
 // APP
 // ============================================================
@@ -100,23 +98,26 @@ app.use((error, req, res, next) => {
 
 const PORT = Number(process.env.PORT || 5000);
 
-app.listen(PORT, () => {
-  console.log("");
-  console.log("==========================================");
+async function startServer() {
+  try {
+    await connectDatabase();
 
-  console.log(" BEL BLOCKCHAIN BACKEND");
+    app.listen(PORT, () => {
+      console.log("");
+      console.log("==========================================");
+      console.log(" BEL BLOCKCHAIN BACKEND");
+      console.log("==========================================");
+      console.log(`Server: http://localhost:${PORT}`);
+      console.log(`Health: http://localhost:${PORT}/api/health`);
+      console.log("Blockchain: Hardhat Localhost");
+      console.log("Chain ID: 31337");
+      console.log("==========================================");
+      console.log("");
+    });
+  } catch (error) {
+    console.error("Backend startup failed:", error.message);
+    process.exit(1);
+  }
+}
 
-  console.log("==========================================");
-
-  console.log(`Server: http://localhost:${PORT}`);
-
-  console.log(`Health: http://localhost:${PORT}/api/health`);
-
-  console.log("Blockchain: Hardhat Localhost");
-
-  console.log("Chain ID: 31337");
-
-  console.log("==========================================");
-
-  console.log("");
-});
+startServer();

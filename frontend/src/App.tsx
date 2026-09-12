@@ -61,6 +61,15 @@ type RoleRecord = {
   timestamp: number;
 };
 
+type BackendAudit = {
+  id: unknown;
+  action: unknown;
+  actor: string;
+  targetId: string;
+  details: string;
+  timestamp: unknown;
+};
+
 // ============================================================
 // CONSTANTS
 // ============================================================
@@ -198,6 +207,8 @@ function App() {
 
   useEffect(() => {
     loadBlockchainData();
+    // Initial data load intentionally runs once when the app mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ==========================================================
@@ -363,7 +374,7 @@ function App() {
         const result = await getAudits();
 
         if (result.success && Array.isArray(result.audits)) {
-          auditRecords = result.audits.map((audit: any) => ({
+          auditRecords = result.audits.map((audit: BackendAudit) => ({
             id: Number(audit.id),
             action: Number(audit.action),
             actor: audit.actor,
@@ -517,7 +528,7 @@ function App() {
       setTransactionStatus("✅ Wallet connected successfully.");
 
       await loadBlockchainData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Wallet connection failed:", error);
 
       setTransactionStatus(getErrorMessage(error));
@@ -572,7 +583,7 @@ function App() {
 
       setTransactionStatus(
         `✅ User created successfully! TX: ${shortAddress(
-          result.transactionHash,
+          result.transactionHash || "",
         )}`,
       );
 
@@ -581,7 +592,7 @@ function App() {
       setNewUserDid("");
 
       await loadBlockchainData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Create user failed:", error);
 
       setTransactionStatus(getErrorMessage(error));
@@ -629,7 +640,7 @@ function App() {
 
       setRoleStatus(
         `✅ ${ROLE_NAMES[roleNumber]} role assigned successfully! TX: ${shortAddress(
-          result.transactionHash,
+          result.transactionHash || "",
         )}`,
       );
 
@@ -637,7 +648,7 @@ function App() {
       setSelectedRole("4");
 
       await loadBlockchainData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Assign role failed:", error);
 
       setRoleStatus(getErrorMessage(error));
@@ -698,7 +709,7 @@ function App() {
 
       setAssetStatus(
         `✅ Digital asset minted successfully! TX: ${shortAddress(
-          result.transactionHash,
+          result.transactionHash || "",
         )}`,
       );
 
@@ -708,7 +719,7 @@ function App() {
       setAssetOwner("");
 
       await loadBlockchainData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Mint asset failed:", error);
 
       setAssetStatus(getErrorMessage(error));
@@ -774,7 +785,7 @@ function App() {
 
       setTransferStatus(
         `✅ Asset transferred successfully! TX: ${shortAddress(
-          result.transactionHash,
+          result.transactionHash || "",
         )}`,
       );
 
@@ -782,7 +793,7 @@ function App() {
       setTransferNewOwner("");
 
       await loadBlockchainData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Transfer failed:", error);
 
       setTransferStatus(getErrorMessage(error));
@@ -830,7 +841,7 @@ function App() {
       });
 
       setAssetSearchStatus("✅ Asset found on blockchain.");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Asset search failed:", error);
 
       setAssetSearchStatus(getErrorMessage(error));
@@ -859,25 +870,36 @@ function App() {
   // ERROR HANDLER
   // ==========================================================
 
-  function getErrorMessage(error: any): string {
-    if (error?.code === 4001 || error?.code === "ACTION_REJECTED") {
+  function getErrorMessage(error: unknown): string {
+    const errorData =
+      typeof error === "object" && error !== null
+        ? (error as {
+            code?: unknown;
+            reason?: unknown;
+            shortMessage?: unknown;
+            info?: { error?: { message?: unknown } };
+            message?: unknown;
+          })
+        : {};
+
+    if (errorData.code === 4001 || errorData.code === "ACTION_REJECTED") {
       return "❌ Transaction rejected in MetaMask.";
     }
 
-    if (error?.reason) {
-      return `❌ ${error.reason}`;
+    if (typeof errorData.reason === "string") {
+      return `❌ ${errorData.reason}`;
     }
 
-    if (error?.shortMessage) {
-      return `❌ ${error.shortMessage}`;
+    if (typeof errorData.shortMessage === "string") {
+      return `❌ ${errorData.shortMessage}`;
     }
 
-    if (error?.info?.error?.message) {
-      return `❌ ${error.info.error.message}`;
+    if (typeof errorData.info?.error?.message === "string") {
+      return `❌ ${errorData.info.error.message}`;
     }
 
-    if (error?.message) {
-      return `❌ ${error.message}`;
+    if (typeof errorData.message === "string") {
+      return `❌ ${errorData.message}`;
     }
 
     return "❌ Transaction failed.";

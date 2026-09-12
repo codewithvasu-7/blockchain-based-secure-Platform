@@ -3,12 +3,14 @@ const { ethers } = require("ethers");
 
 const {
   identityContract,
-  identityWrite
+  identityWrite,
 } = require("../blockchain");
 
 const {
-  getErrorMessage
+  getErrorMessage,
 } = require("../utils/errors");
+
+const User = require("../models/User");
 
 const router = express.Router();
 
@@ -18,42 +20,82 @@ const router = express.Router();
 // ============================================================
 
 router.get("/:wallet", async (req, res) => {
-
   try {
-
     const wallet = req.params.wallet;
 
+    // Validate wallet address
     if (!ethers.isAddress(wallet)) {
       return res.status(400).json({
         success: false,
-        error: "Invalid wallet address"
+        error: "Invalid wallet address",
       });
     }
 
-    const user =
-      await identityContract.getUser(wallet);
+    // ========================================================
+    // BLOCKCHAIN = SOURCE OF TRUTH
+    // ========================================================
+
+    const user = await identityContract.getUser(wallet);
+
+    // User does not exist on blockchain
+    if (!user[1]) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    const userData = {
+      name: user[0],
+      did: user[1],
+      active: user[2],
+    };
+
+    // ========================================================
+    // SAVE / UPDATE USER IN MONGODB
+    // ========================================================
+
+    const dbUser = await User.findOneAndUpdate(
+      {
+        wallet: wallet.toLowerCase(),
+      },
+      {
+        wallet: wallet.toLowerCase(),
+        name: userData.name,
+        did: userData.did,
+        active: userData.active,
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    // ========================================================
+    // RESPONSE
+    // ========================================================
 
     res.json({
       success: true,
 
       wallet,
 
-      user: {
-        name: user[0],
-        did: user[1],
-        active: user[2]
-      }
-    });
+      user: userData,
 
+      database: {
+        saved: true,
+        id: dbUser._id,
+      },
+    });
   } catch (error) {
+    console.error("Get user error:", error);
 
     res.status(500).json({
       success: false,
-      error: getErrorMessage(error)
+      error: getErrorMessage(error),
     });
-
   }
-
 });
 
 // ============================================================
@@ -62,75 +104,102 @@ router.get("/:wallet", async (req, res) => {
 // ============================================================
 
 router.post("/", async (req, res) => {
-
   try {
-
     const {
       wallet,
       name,
-      did
-    } = req.body;
+      did,
+    } = req.body || {};
+
+    // ========================================================
+    // VALIDATION
+    // ========================================================
 
     if (!ethers.isAddress(wallet)) {
-
       return res.status(400).json({
         success: false,
-        error: "Invalid wallet address"
+        error: "Invalid wallet address",
       });
-
     }
 
     if (!name || !name.trim()) {
-
       return res.status(400).json({
         success: false,
-        error: "User name is required"
+        error: "User name is required",
       });
-
     }
 
     if (!did || !did.trim()) {
-
       return res.status(400).json({
         success: false,
-        error: "DID is required"
+        error: "DID is required",
       });
-
     }
 
-    const tx =
-      await identityWrite.createUser(
-        wallet,
-        name.trim(),
-        did.trim()
-      );
+    // ========================================================
+    // 1. CREATE USER ON BLOCKCHAIN
+    // ========================================================
 
-    const receipt =
-      await tx.wait();
+    const tx = await identityWrite.createUser(
+      wallet,
+      name.trim(),
+      did.trim()
+    );
+
+    // Wait for blockchain confirmation
+    const receipt = await tx.wait();
+
+    // ========================================================
+    // 2. SAVE USER IN MONGODB
+    // ========================================================
+
+    const dbUser = await User.findOneAndUpdate(
+      {
+        wallet: wallet.toLowerCase(),
+      },
+      {
+        wallet: wallet.toLowerCase(),
+        name: name.trim(),
+        did: did.trim(),
+        active: true,
+
+        // Blockchain transaction information
+        transactionHash: tx.hash,
+        blockNumber: receipt.blockNumber,
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    // ========================================================
+    // RESPONSE
+    // ========================================================
 
     res.status(201).json({
-
       success: true,
 
-      message:
-        "User created successfully",
+      message: "User created successfully",
 
       transactionHash: tx.hash,
 
-      blockNumber:
-        receipt.blockNumber
+      blockNumber: receipt.blockNumber,
 
+      database: {
+        saved: true,
+        id: dbUser._id,
+      },
     });
-
   } catch (error) {
+    console.error("Create user error:", error);
 
     res.status(500).json({
       success: false,
-      error: getErrorMessage(error)
+      error: getErrorMessage(error),
     });
-
   }
-
 });
 
 // ============================================================
@@ -141,54 +210,84 @@ router.post("/", async (req, res) => {
 router.patch(
   "/:wallet/deactivate",
   async (req, res) => {
-
     try {
+      const wallet = req.params.wallet;
 
-      const wallet =
-        req.params.wallet;
+      // ======================================================
+      // VALIDATE WALLET
+      // ======================================================
 
       if (!ethers.isAddress(wallet)) {
-
         return res.status(400).json({
           success: false,
-          error: "Invalid wallet address"
+          error: "Invalid wallet address",
         });
-
       }
 
-      const tx =
-        await identityWrite.deactivateUser(
-          wallet
-        );
+      // ======================================================
+      // 1. DEACTIVATE USER ON BLOCKCHAIN
+      // ======================================================
 
-      const receipt =
-        await tx.wait();
+      const tx = await identityWrite.deactivateUser(
+        wallet
+      );
+
+      // Wait for blockchain confirmation
+      const receipt = await tx.wait();
+
+      // ======================================================
+      // 2. UPDATE USER IN MONGODB
+      // ======================================================
+
+      const dbUser = await User.findOneAndUpdate(
+        {
+          wallet: wallet.toLowerCase(),
+        },
+        {
+          active: false,
+
+          transactionHash: tx.hash,
+
+          blockNumber: receipt.blockNumber,
+        },
+        {
+          new: true,
+        }
+      );
+
+      // ======================================================
+      // RESPONSE
+      // ======================================================
 
       res.json({
-
         success: true,
 
-        message:
-          "User deactivated successfully",
+        message: "User deactivated successfully",
 
-        transactionHash:
-          tx.hash,
+        transactionHash: tx.hash,
 
-        blockNumber:
-          receipt.blockNumber
+        blockNumber: receipt.blockNumber,
 
+        database: {
+          saved: !!dbUser,
+        },
       });
-
     } catch (error) {
+      console.error(
+        "Deactivate user error:",
+        error
+      );
 
       res.status(500).json({
         success: false,
-        error: getErrorMessage(error)
+        error: getErrorMessage(error),
       });
-
     }
-
   }
 );
+
+// ============================================================
+// EXPORT ROUTER
+// ============================================================
 
 module.exports = router;

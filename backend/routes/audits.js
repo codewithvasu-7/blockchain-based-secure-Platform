@@ -1,21 +1,27 @@
 const express = require("express");
 
 const {
-  auditContract
+  auditContract,
 } = require("../blockchain");
 
 const {
-  getErrorMessage
+  getErrorMessage,
 } = require("../utils/errors");
 
+const AuditLog = require("../models/AuditLog");
+
 const router = express.Router();
+
+// ============================================================
+// ACTION NAMES
+// ============================================================
 
 const ACTION_NAMES = [
   "USER_CREATED",
   "ROLE_ASSIGNED",
   "ASSET_MINTED",
   "ASSET_TRANSFERRED",
-  "PERMISSION_CHANGED"
+  "PERMISSION_CHANGED",
 ];
 
 // ============================================================
@@ -24,8 +30,10 @@ const ACTION_NAMES = [
 // ============================================================
 
 router.get("/", async (req, res) => {
-
   try {
+    // ========================================================
+    // BLOCKCHAIN = SOURCE OF TRUTH
+    // ========================================================
 
     const total =
       await auditContract.getTotalAudits();
@@ -37,9 +45,7 @@ router.get("/", async (req, res) => {
       i <= Number(total);
       i++
     ) {
-
       try {
-
         const record =
           await auditContract.getAudit(i);
 
@@ -49,10 +55,8 @@ router.get("/", async (req, res) => {
         const timestamp =
           Number(record[5]);
 
-        audits.push({
-
-          id:
-            Number(record[0]),
+        const auditData = {
+          id: Number(record[0]),
 
           action,
 
@@ -60,54 +64,102 @@ router.get("/", async (req, res) => {
             ACTION_NAMES[action] ||
             "UNKNOWN",
 
-          actor:
-            record[2],
+          actor: record[2],
 
-          targetId:
-            record[3],
+          targetId: record[3],
 
-          details:
-            record[4],
+          details: record[4],
 
           timestamp,
 
-          date:
-            new Date(
-              timestamp * 1000
-            ).toISOString()
+          date: new Date(
+            timestamp * 1000
+          ).toISOString(),
+        };
 
-        });
+        audits.push(auditData);
 
-      } catch {
+        // ====================================================
+        // SAVE / UPDATE AUDIT IN MONGODB
+        // ====================================================
+
+        await AuditLog.findOneAndUpdate(
+          {
+            blockchainId:
+              auditData.id,
+          },
+          {
+            blockchainId:
+              auditData.id,
+
+            action:
+              auditData.action,
+
+            actionName:
+              auditData.actionName,
+
+            actor:
+              auditData.actor.toLowerCase(),
+
+            targetId:
+              auditData.targetId,
+
+            details:
+              auditData.details,
+
+            timestamp:
+              auditData.timestamp,
+
+            date:
+              new Date(
+                timestamp * 1000
+              ),
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+          }
+        );
+      } catch (error) {
+        console.error(
+          `Failed to process audit ${i}:`,
+          error.message
+        );
 
         // Skip invalid audit
-
       }
-
     }
 
+    // Latest audit first
     audits.reverse();
 
-    res.json({
+    // ========================================================
+    // RESPONSE
+    // ========================================================
 
+    res.json({
       success: true,
 
-      total:
-        audits.length,
+      total: audits.length,
 
-      audits
+      audits,
 
+      database: {
+        synced: true,
+      },
     });
-
   } catch (error) {
+    console.error(
+      "Get audits error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      error: getErrorMessage(error)
+      error: getErrorMessage(error),
     });
-
   }
-
 });
 
 // ============================================================
@@ -116,9 +168,7 @@ router.get("/", async (req, res) => {
 // ============================================================
 
 router.get("/:id", async (req, res) => {
-
   try {
-
     const id =
       Number(req.params.id);
 
@@ -126,14 +176,15 @@ router.get("/:id", async (req, res) => {
       !Number.isInteger(id) ||
       id <= 0
     ) {
-
       return res.status(400).json({
         success: false,
-        error:
-          "Invalid audit ID"
+        error: "Invalid audit ID",
       });
-
     }
+
+    // ========================================================
+    // BLOCKCHAIN = SOURCE OF TRUTH
+    // ========================================================
 
     const record =
       await auditContract.getAudit(id);
@@ -144,54 +195,99 @@ router.get("/:id", async (req, res) => {
     const timestamp =
       Number(record[5]);
 
-    res.json({
+    const auditData = {
+      id: Number(record[0]),
 
+      action,
+
+      actionName:
+        ACTION_NAMES[action] ||
+        "UNKNOWN",
+
+      actor: record[2],
+
+      targetId: record[3],
+
+      details: record[4],
+
+      timestamp,
+
+      date: new Date(
+        timestamp * 1000
+      ).toISOString(),
+    };
+
+    // ========================================================
+    // SYNC SINGLE AUDIT WITH MONGODB
+    // ========================================================
+
+    const dbAudit =
+      await AuditLog.findOneAndUpdate(
+        {
+          blockchainId:
+            auditData.id,
+        },
+        {
+          blockchainId:
+            auditData.id,
+
+          action:
+            auditData.action,
+
+          actionName:
+            auditData.actionName,
+
+          actor:
+            auditData.actor.toLowerCase(),
+
+          targetId:
+            auditData.targetId,
+
+          details:
+            auditData.details,
+
+          timestamp:
+            auditData.timestamp,
+
+          date:
+            auditData.date,
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        }
+      );
+
+    // ========================================================
+    // RESPONSE
+    // ========================================================
+
+    res.json({
       success: true,
 
-      audit: {
+      audit: auditData,
 
-        id:
-          Number(record[0]),
-
-        action,
-
-        actionName:
-          ACTION_NAMES[action] ||
-          "UNKNOWN",
-
-        actor:
-          record[2],
-
-        targetId:
-          record[3],
-
-        details:
-          record[4],
-
-        timestamp,
-
-        date:
-          new Date(
-            timestamp * 1000
-          ).toISOString()
-
-      }
-
+      database: {
+        saved: true,
+        id: dbAudit._id,
+      },
     });
-
   } catch (error) {
+    console.error(
+      "Get audit error:",
+      error
+    );
 
     res.status(404).json({
-
       success: false,
-
-      error:
-        getErrorMessage(error)
-
+      error: getErrorMessage(error),
     });
-
   }
-
 });
+
+// ============================================================
+// EXPORT ROUTER
+// ============================================================
 
 module.exports = router;

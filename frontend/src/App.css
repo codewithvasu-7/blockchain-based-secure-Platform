@@ -659,8 +659,19 @@ nav {
   width: 100%;
   overflow-x: auto;
   margin-top: 8px;
-  scrollbar-width: thin;
-  scrollbar-color: #2c4057 transparent;
+}
+
+.asset-table::-webkit-scrollbar {
+  height: 7px;
+}
+
+.asset-table::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.asset-table::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: #2c4057;
 }
 
 .asset-header,
@@ -942,11 +953,6 @@ footer small {
   .logo {
     justify-content: center;
     padding: 0 0 20px;
-  }
-
-  .logo > div:last-child,
-  .nav-item:not(.active) {
-    /* Keep navigation compact on tablet. */
   }
 
   .logo > div:last-child {

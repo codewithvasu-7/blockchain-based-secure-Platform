@@ -3,21 +3,27 @@ const { ethers } = require("ethers");
 
 const {
   rbacContract,
-  rbacWrite
+  rbacWrite,
 } = require("../blockchain");
 
 const {
-  getErrorMessage
+  getErrorMessage,
 } = require("../utils/errors");
 
+const User = require("../models/User");
+
 const router = express.Router();
+
+// ============================================================
+// ROLE NAMES
+// ============================================================
 
 const ROLE_NAMES = [
   "NONE",
   "ADMIN",
   "MANAGER",
   "AUDITOR",
-  "USER"
+  "USER",
 ];
 
 // ============================================================
@@ -26,20 +32,23 @@ const ROLE_NAMES = [
 // ============================================================
 
 router.get("/:wallet", async (req, res) => {
-
   try {
+    const wallet = req.params.wallet;
 
-    const wallet =
-      req.params.wallet;
+    // ========================================================
+    // VALIDATE WALLET
+    // ========================================================
 
     if (!ethers.isAddress(wallet)) {
-
       return res.status(400).json({
         success: false,
-        error: "Invalid wallet address"
+        error: "Invalid wallet address",
       });
-
     }
+
+    // ========================================================
+    // GET ROLE FROM BLOCKCHAIN
+    // ========================================================
 
     const role =
       await rbacContract.getRole(wallet);
@@ -47,30 +56,56 @@ router.get("/:wallet", async (req, res) => {
     const roleNumber =
       Number(role);
 
-    res.json({
+    const roleName =
+      ROLE_NAMES[roleNumber] ||
+      "UNKNOWN";
 
+    // ========================================================
+    // SYNC ROLE WITH MONGODB
+    // ========================================================
+
+    const dbUser =
+      await User.findOneAndUpdate(
+        {
+          wallet: wallet.toLowerCase(),
+        },
+        {
+          role: roleName,
+        },
+        {
+          new: true,
+        }
+      );
+
+    // ========================================================
+    // RESPONSE
+    // ========================================================
+
+    res.json({
       success: true,
 
       wallet,
 
       role: {
         id: roleNumber,
-        name:
-          ROLE_NAMES[roleNumber] ||
-          "UNKNOWN"
-      }
+        name: roleName,
+      },
 
+      database: {
+        synced: !!dbUser,
+      },
     });
-
   } catch (error) {
+    console.error(
+      "Get role error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      error: getErrorMessage(error)
+      error: getErrorMessage(error),
     });
-
   }
-
 });
 
 // ============================================================
@@ -79,22 +114,26 @@ router.get("/:wallet", async (req, res) => {
 // ============================================================
 
 router.post("/", async (req, res) => {
-
   try {
-
     const {
       wallet,
-      role
-    } = req.body;
+      role,
+    } = req.body || {};
+
+    // ========================================================
+    // VALIDATE WALLET
+    // ========================================================
 
     if (!ethers.isAddress(wallet)) {
-
       return res.status(400).json({
         success: false,
-        error: "Invalid wallet address"
+        error: "Invalid wallet address",
       });
-
     }
+
+    // ========================================================
+    // VALIDATE ROLE
+    // ========================================================
 
     const roleNumber =
       Number(role);
@@ -104,14 +143,36 @@ router.post("/", async (req, res) => {
       roleNumber < 1 ||
       roleNumber > 4
     ) {
-
       return res.status(400).json({
         success: false,
         error:
-          "Role must be between 1 and 4"
+          "Role must be between 1 and 4",
+      });
+    }
+
+    const roleName =
+      ROLE_NAMES[roleNumber];
+
+    // ========================================================
+    // CHECK USER EXISTS IN MONGODB
+    // ========================================================
+
+    const existingUser =
+      await User.findOne({
+        wallet: wallet.toLowerCase(),
       });
 
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        error:
+          "User is not registered. Create the user first.",
+      });
     }
+
+    // ========================================================
+    // 1. ASSIGN ROLE ON BLOCKCHAIN
+    // ========================================================
 
     const tx =
       await rbacWrite.assignRole(
@@ -119,33 +180,76 @@ router.post("/", async (req, res) => {
         roleNumber
       );
 
+    // Wait for confirmation
     const receipt =
       await tx.wait();
 
-    res.json({
+    // ========================================================
+    // 2. UPDATE ROLE IN MONGODB
+    // ========================================================
 
+    const dbUser =
+      await User.findOneAndUpdate(
+        {
+          wallet: wallet.toLowerCase(),
+        },
+        {
+          role: roleName,
+
+          transactionHash:
+            tx.hash,
+
+          blockNumber:
+            receipt.blockNumber,
+        },
+        {
+          new: true,
+        }
+      );
+
+    // ========================================================
+    // RESPONSE
+    // ========================================================
+
+    res.json({
       success: true,
 
       message:
-        `${ROLE_NAMES[roleNumber]} role assigned successfully`,
+        `${roleName} role assigned successfully`,
+
+      wallet,
+
+      role: {
+        id: roleNumber,
+        name: roleName,
+      },
 
       transactionHash:
         tx.hash,
 
       blockNumber:
-        receipt.blockNumber
+        receipt.blockNumber,
 
+      database: {
+        saved: !!dbUser,
+        id: dbUser?._id || null,
+      },
     });
-
   } catch (error) {
+    console.error(
+      "Assign role error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      error: getErrorMessage(error)
+      error: getErrorMessage(error),
     });
-
   }
-
 });
+
+// ============================================================
+// EXPORT ROUTER
+// ============================================================
 
 module.exports = router;
